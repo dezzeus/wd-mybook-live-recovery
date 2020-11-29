@@ -106,6 +106,77 @@ attempt_os_recovery() {
     echo "  reboot"
 }
 
+apt_post_recovery() {
+    # The latest firmware use Debian 7 "wheezy" and should support Debian 6 "squeeze"
+    # The provided repositories doesn't support those versions anymore, hence we need to add extra ones.
+    # You can use repositories over HTTPS if the according mirror supports it, but versions of Debian
+    # before the 9 "stretch", will need to install the apt-transport-https package first.
+    echo "deb http://debian.ethz.ch/debian-archive/ wheezy main contrib non-free" >> /etc/apt/sources.list
+    echo "deb http://archive.debian.org/debian/ wheezy main contrib non-free" >> /etc/apt/sources.list
+    echo "deb http://debian.ethz.ch/debian-archive/ squeeze main contrib non-free" >> /etc/apt/sources.list
+    echo "deb http://archive.debian.org/debian/ squeeze main contrib non-free" >> /etc/apt/sources.list
+    apt-get update &> /dev/null
+}
+
+install_compile_tools() {
+    apt-get update &> /dev/null
+    cd /tmp
+    # Due to un-verified repositories, we need to pass `-y --force-yes`.
+    # Due to libc being shipped also by WD, we need to tell dpkg to overwrite that.
+    apt-get -o Dpkg::Options::="--force-overwrite" --force-yes -y install gcc
+    # the upgrade of libc will ask (ncurses UI) to restart some services; this is fine.
+    apt-get -y --force-yes install make
+}
+
+# DO NOT RUN AS A COMMAND; do step by step or automate it! Right now is for documentation only!
+install_minidlna() {
+    # ensure that the stock DLNA service is stopped.
+    # [ToDo]: automate it!
+    apt-get update &> /dev/null
+    # check if install_compile_tools is needed
+    cd /tmp
+    # MiniDLNA's README list the followings prerequisites:
+    # libexif, libjpeg, libid3tag, libFLAC, libvorbis, libsqlite3, libavformat (the ffmpeg libraries)
+    apt-get -y --force-yes --no-install-recommends install libexif-dev libjpeg8-dev libid3tag* libFLAC-dev libvorbis-dev libsqlite3-dev libavformat-dev
+    # The configure script seems to check also for:
+    # libavutil, libavcodec, libogg; avahi-client, avahi-common
+    # Avahi, an implementation of DNS Service Discovery (DNS-SD RFC 6763) over Multicast DNS (mDNS RFC 6762) compatible with Apple Bonjour, is probably not needed.
+    apt-get -y --force-yes --no-install-recommends install libavutil-dev libavcodec-dev libogg-dev
+    # Suggested from blogs:
+    apt-get -y --force-yes --no-install-recommends install ffmpeg imagemagick mediainfo ffmpegthumbnailer libfreetype6-dev libass-dev
+    #apt-get install mencoder transcode libmp3lame-dev libx264-dev libva-dev libvpx-dev libvo-aacenc-dev libv4l-dev
+
+    # wget's SSL cannot download over HTTPS.
+    #wget http://sourceforge.net/projects/minidlna/files/latest/download?source=files -O minidlna.tar.gz
+    cp /DataVolume/shares/Public/Software/minidlna-1.3.0.tar.gz minidlna.tar.gz
+    tar -xvf minidlna.tar.gz
+    # [TBD]: chmod -R 777 ?
+    cd minidlna*
+    # Configure, compile and install miniDLNA, it will take 5 minutes:
+    # [NOTE]: disable multi-language (nls) because I cannot install gettext.
+    ./configure --disable-nls && make && make install
+    # Copy the miniDLNA default configuration file
+    cp minidlna.conf /etc/
+    # replace the followings in the config file:
+    # media_dir=AVP,/DataVolume/shares/Public
+    # friendly_name=MyBook Live
+    # log_dir=/var/log
+    # log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=error
+    # wide_links=yes
+    # enable_subtitles=yes
+    # root_container=B
+    # Copy the miniDLNA init.d script to autostart miniDLNA on boot:
+    cp linux/minidlna.init.d.script /etc/init.d/minidlna
+    chmod +x /etc/init.d/minidlna
+    # Update rc to use the miniDLNA defaults:
+    update-rc.d minidlna defaults
+    /usr/local/sbin/minidlnad -R
+    # https://www.htpcguides.com/install-latest-readymedia-minidlna-ubuntu/
+    # https://terminal28.com/minidlna-upnp-media-server-debian-linux/
+    # https://community.wd.com/t/breathing-new-life-into-mbl-new-disk-sleep-monitoring-minidlna-openvpn/161764/4
+    # delete stuff from /tmp ?
+}
+
 #---[ FUNCTIONS ]---------------------------------------------------------------
 
 # clear any old partitioning data, etc.
